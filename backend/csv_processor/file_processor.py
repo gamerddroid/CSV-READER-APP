@@ -84,6 +84,44 @@ class LargeCSVProcessor:
         logger.info(f"Saved large file {filename} to temp location with ID {db_file.id}")
         return db_file
     
+    def create_file_record_memory(self, filename: str, file_size: int) -> UploadedFile:
+        """
+        Create database record for large files processed in memory.
+        """
+        # Create database record without file_path for memory processing
+        db_file = UploadedFile.objects.create(
+            filename=filename,
+            file_path='',  # No physical file path for memory processing
+            file_size=file_size,
+            status='uploading'
+        )
+        
+        logger.info(f"Created memory record for large file {filename} with ID {db_file.id}")
+        return db_file
+    
+    def analyze_file_structure_from_content(self, file_content: bytes) -> Tuple[list, dict, int]:
+        """
+        Analyze CSV file structure from file content bytes.
+        """
+        import io
+        
+        # Convert bytes to string IO
+        content_str = file_content.decode('utf-8')
+        file_io = io.StringIO(content_str)
+        
+        # Read first chunk to determine structure
+        chunk_iter = pd.read_csv(file_io, chunksize=self.chunk_size)
+        first_chunk = next(chunk_iter)
+        
+        columns = first_chunk.columns.tolist()
+        dtypes = first_chunk.dtypes.astype(str).to_dict()
+        
+        # Estimate total rows by content size
+        avg_row_size = len(content_str) / len(first_chunk) if len(first_chunk) > 0 else 1
+        estimated_rows = int(len(content_str) / avg_row_size)
+        
+        return columns, dtypes, estimated_rows
+    
     def analyze_file_structure(self, file_path: str) -> Tuple[list, dict, int]:
         """
         Analyze CSV file structure without loading entire file into memory.
@@ -194,21 +232,27 @@ class LargeCSVProcessor:
         
         return stats
     
-    def process_file_async(self, file_id: str, move_from_temp: bool = False):
+    def process_file_async(self, file_id: str, move_from_temp: bool = False, file_content: bytes = None):
         """
         Process file asynchronously (to be used with Celery).
         
         Args:
             file_id: UUID of the UploadedFile record
             move_from_temp: If True, move file from temp to permanent location first
+            file_content: For large files, process directly from memory content
         """
         try:
             db_file = UploadedFile.objects.get(id=file_id)
             db_file.status = 'processing'
             db_file.save()
             
-            # Move from temp to permanent location if needed
-            if move_from_temp:
+            # Handle different processing modes
+            if file_content:
+                # Large file: process from memory content
+                logger.info(f"Processing large file {db_file.filename} from memory content")
+                columns, dtypes, estimated_rows = self.analyze_file_structure_from_content(file_content)
+            elif move_from_temp:
+                # Move from temp to permanent location if needed
                 uploads_dir = '/tmp/csv_uploads'
                 os.makedirs(uploads_dir, exist_ok=True)
                 
@@ -224,9 +268,10 @@ class LargeCSVProcessor:
                 db_file.save()
                 
                 logger.info(f"Moved large file from temp to permanent location: {permanent_path}")
-            
-            # Analyze file structure
-            columns, dtypes, estimated_rows = self.analyze_file_structure(db_file.file_path)
+                columns, dtypes, estimated_rows = self.analyze_file_structure(db_file.file_path)
+            else:
+                # Small file: analyze from file path
+                columns, dtypes, estimated_rows = self.analyze_file_structure(db_file.file_path)
             
             # Update database with initial analysis
             db_file.columns = columns

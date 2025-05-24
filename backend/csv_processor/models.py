@@ -13,7 +13,7 @@ class UploadedFile(models.Model):
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     filename = models.CharField(max_length=255)
-    file_path = models.CharField(max_length=500)
+    file_path = models.CharField(max_length=500, blank=True)  # Optional for memory-only processing
     file_size = models.BigIntegerField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploading')
     total_rows = models.BigIntegerField(null=True, blank=True)
@@ -28,7 +28,7 @@ class UploadedFile(models.Model):
         return f"{self.filename} ({self.status})"
     
     def delete(self, *args, **kwargs):
-        # Clean up the file when deleting the record
+        # Clean up the file when deleting the record (only if file exists on disk)
         if self.file_path and os.path.exists(self.file_path):
             os.remove(self.file_path)
         super().delete(*args, **kwargs)
