@@ -5,7 +5,14 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework import status
 from django.http import JsonResponse
+import logging
 
+
+logging.basicConfig(
+    filename='logs/csv_debug.log',
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(message)s'
+)
 
 @api_view(['POST'])
 @parser_classes([MultiPartParser])
@@ -30,6 +37,9 @@ def upload_csv(request):
         io_string = io.StringIO(decoded_file)
         df = pd.read_csv(io_string)
         
+        logging.info("DataFrame shape: %s", df.shape)
+        logging.info("DataFrame columns: %s", df.columns.tolist())
+        logging.info("DataFrame head:\n%s", df.head().to_string())
         # Get DataFrame information
         dataframe_info = {
             'shape': df.shape,
