@@ -45,13 +45,13 @@ def upload_large_csv(request):
         
         processor = LargeCSVProcessor()
         
-        # For files > 1GB, handle copying in background
+        # For files > 1GB, process directly from memory without disk copy
         large_file_threshold = 1 * 1024 * 1024 * 1024  # 1GB
         if uploaded_file.size > large_file_threshold:
-            # Save to temporary location first
-            db_file = processor.save_uploaded_file_temp(uploaded_file, uploaded_file.name)
-            # Process everything (copy + analysis) in background
-            process_large_csv.delay(str(db_file.id), move_from_temp=True)
+            # Create database record without file path
+            db_file = processor.create_file_record_memory(uploaded_file.name, uploaded_file.size)
+            # Process directly from uploaded file data
+            process_large_csv.delay(str(db_file.id), file_content=uploaded_file.read())
         else:
             # Small files: immediate copy, background analysis
             db_file = processor.save_uploaded_file(uploaded_file, uploaded_file.name)
@@ -111,6 +111,13 @@ def get_file_data(request, file_id):
         if db_file.status != 'completed':
             return Response(
                 {'error': f'File processing not completed. Current status: {db_file.status}'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if file was processed in memory (large files >1GB)
+        if not db_file.file_path:
+            return Response(
+                {'error': 'Large files processed in memory do not support data viewing. Only metadata is available.'}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         
