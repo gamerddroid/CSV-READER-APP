@@ -29,6 +29,7 @@ def upload_large_csv(request):
         
         uploaded_file = request.FILES['file']
         
+        logger.info(f"{uploaded_file} uploaded succesfully")
         if not uploaded_file.name.endswith('.csv'):
             return Response(
                 {'error': 'File must be a CSV'}, 
@@ -51,9 +52,18 @@ def upload_large_csv(request):
             # Create database record without file path
             db_file = processor.create_file_record_memory(uploaded_file.name, uploaded_file.size)
             # Process directly from uploaded file data
-            process_large_csv.delay(str(db_file.id), file_content=uploaded_file.read())
+            logger.info(f"{uploaded_file.name} (large file) assigned to celery worker.")
+            
+            # Encode file content as base64 for Celery serialization
+            import base64
+            file_content = uploaded_file.read()
+            file_content_b64 = base64.b64encode(file_content).decode('utf-8')
+            logger.info(f"File content encoded, size: {len(file_content_b64)}")
+            
+            process_large_csv.delay(str(db_file.id), file_content_b64=file_content_b64)
         else:
             # Small files: immediate copy, background analysis
+            logger.info(f"{uploaded_file.name} (small file) assigned to celery worker.")
             db_file = processor.save_uploaded_file(uploaded_file, uploaded_file.name)
             process_large_csv.delay(str(db_file.id))
         

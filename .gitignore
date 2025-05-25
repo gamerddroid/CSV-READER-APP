@@ -1,6 +1,31 @@
-backend/venv
-frontend/node_modules
-backend/*/__pycache__
-logs
+#––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+# Virtualenvs & node modules
+backend/venv/
+frontend/node_modules/
+
+#––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+# Python bytecode
+#   - ignore all __pycache__ dirs anywhere
+#   - ignore all *.py[cod] (pyc, pyo, .py.class)
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+#––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+# Django migration byte-compiled files
+#   - if you only want to ignore the compiled .pyc files in migrations,
+#     but still track the .py source, this rule catches *.pyc under any migrations folder
+**/migrations/*.py[cod]
+
+#––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+# Database, logs, and other artifacts
 backend/db.sqlite3
-*php
+logs/
+
+#––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+# Optional extras
+# coverage reports
+htmlcov/
+# MacOS
+.DS_Store
+.coverage

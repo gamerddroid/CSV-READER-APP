@@ -1,10 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
+import UploadSection from './components/UploadSection';
+import FilesList from './components/FilesList';
+import DataViewer from './components/DataViewer';
+import ErrorMessage from './components/ErrorMessage';
 
 function App() {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploading, setUploading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileData, setFileData] = useState(null);
@@ -46,24 +52,30 @@ function App() {
       return;
     }
 
-    setLoading(true);
+    setUploading(true);
+    setUploadProgress(0);
     setError(null);
 
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-      const response = await axios.post(
+      await axios.post(
         'http://localhost:8000/api/upload-large-csv/',
         formData,
         {
           headers: {
             'Content-Type': 'multipart/form-data',
           },
+          onUploadProgress: (progressEvent) => {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(percentCompleted);
+          },
         }
       );
 
       setFile(null);
+      setUploadProgress(100);
       // Reset file input
       const fileInput = document.querySelector('input[type="file"]');
       if (fileInput) fileInput.value = '';
@@ -78,7 +90,8 @@ function App() {
         setError('An error occurred while uploading the file');
       }
     } finally {
-      setLoading(false);
+      setUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -137,206 +150,43 @@ function App() {
     }
   };
 
-  const formatFileSize = (bytes) => {
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-    if (bytes === 0) return '0 Bytes';
-    const i = parseInt(Math.floor(Math.log(bytes) / Math.log(1024)));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
-  };
-
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleString();
-  };
-
-  const renderUploadSection = () => (
-    <div className="upload-section">
-      <h2>Upload Large CSV File</h2>
-      <p>Supports files up to 50GB with efficient memory usage</p>
-      <div className="file-input">
-        <input
-          type="file"
-          accept=".csv"
-          onChange={handleFileChange}
-        />
-      </div>
-      <button
-        className="upload-btn"
-        onClick={handleUpload}
-        disabled={loading || !file}
-      >
-        {loading ? 'Uploading...' : 'Upload and Process'}
-      </button>
-    </div>
-  );
-
-  const renderFilesList = () => (
-    <div className="files-section">
-      <h2>Uploaded Files</h2>
-      {uploadedFiles.length === 0 ? (
-        <p>No files uploaded yet.</p>
-      ) : (
-        <div className="files-list">
-          {uploadedFiles.map((file) => (
-            <div 
-              key={file.file_id} 
-              className={`file-item ${selectedFile?.file_id === file.file_id ? 'selected' : ''}`}
-              onClick={() => handleFileSelect(file)}
-            >
-              <div className="file-header">
-                <h4>{file.filename}</h4>
-                <button 
-                  className="delete-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteFile(file.file_id);
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-              <div className="file-info">
-                <p><strong>Size:</strong> {formatFileSize(file.file_size)}</p>
-                <p><strong>Status:</strong> 
-                  <span className={`status ${file.status}`}>{file.status}</span>
-                </p>
-                {file.total_rows && (
-                  <p><strong>Rows:</strong> {file.total_rows.toLocaleString()}</p>
-                )}
-                {file.status === 'processing' && (
-                  <div className="progress">
-                    <div 
-                      className="progress-bar" 
-                      style={{width: `${file.processing_progress}%`}}
-                    ></div>
-                    <span>{file.processing_progress.toFixed(1)}%</span>
-                  </div>
-                )}
-                <p><strong>Uploaded:</strong> {formatDate(file.created_at)}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
-  const renderDataViewer = () => {
-    if (!selectedFile) {
-      return (
-        <div className="data-section">
-          <h2>Data Viewer</h2>
-          <p>Select a completed file to view its data.</p>
-        </div>
-      );
-    }
-
-    if (selectedFile.status !== 'completed') {
-      return (
-        <div className="data-section">
-          <h2>Data Viewer</h2>
-          <p>File is {selectedFile.status}. Data will be available once processing is complete.</p>
-        </div>
-      );
-    }
-
-    if (!fileData) {
-      return (
-        <div className="data-section">
-          <h2>Data Viewer</h2>
-          <p>Loading data...</p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="data-section">
-        <h2>Data Viewer - {selectedFile.filename}</h2>
-        
-        <div className="data-controls">
-          <div className="pagination-info">
-            <p>
-              Showing {((fileData.page - 1) * fileData.page_size) + 1} to {Math.min(fileData.page * fileData.page_size, fileData.total_rows)} 
-              of {fileData.total_rows.toLocaleString()} rows
-            </p>
-          </div>
-          
-          <div className="controls">
-            <label>
-              Rows per page:
-              <select value={pageSize} onChange={handlePageSizeChange} disabled={loading}>
-                {[50, 100, 500, 1000, 5000].map(size => (
-                  <option key={size} value={size}>{size}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                {fileData.columns.map((col, index) => (
-                  <th key={index}>{col}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {fileData.data.map((row, rowIndex) => (
-                <tr key={rowIndex}>
-                  {fileData.columns.map((col, colIndex) => (
-                    <td key={colIndex}>
-                      {row[col] !== null && row[col] !== undefined ? String(row[col]) : ''}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="pagination-controls">
-          <button
-            onClick={() => handlePageChange(fileData.page - 1)}
-            disabled={!fileData.has_previous || loading}
-          >
-            Previous
-          </button>
-          <span>
-            Page {fileData.page} of {fileData.total_pages}
-          </span>
-          <button
-            onClick={() => handlePageChange(fileData.page + 1)}
-            disabled={!fileData.has_next || loading}
-          >
-            Next
-          </button>
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="App">
       <div className="container">
         <h1>Large CSV Reader</h1>
         <p>Upload and efficiently browse large CSV files (up to 50GB) with chunked processing.</p>
         
-        {renderUploadSection()}
+        <UploadSection
+          file={file}
+          uploading={uploading}
+          uploadProgress={uploadProgress}
+          onFileChange={handleFileChange}
+          onUpload={handleUpload}
+        />
         
-        {error && (
-          <div className="error">
-            Error: {error}
-            <button onClick={() => setError(null)}>×</button>
-          </div>
-        )}
+        <ErrorMessage
+          error={error}
+          onClose={() => setError(null)}
+        />
         
         <div className="main-content">
           <div className="left-panel">
-            {renderFilesList()}
+            <FilesList
+              uploadedFiles={uploadedFiles}
+              selectedFile={selectedFile}
+              onFileSelect={handleFileSelect}
+              onDeleteFile={deleteFile}
+            />
           </div>
           <div className="right-panel">
-            {renderDataViewer()}
+            <DataViewer
+              selectedFile={selectedFile}
+              fileData={fileData}
+              loading={loading}
+              pageSize={pageSize}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+            />
           </div>
         </div>
       </div>

@@ -242,17 +242,23 @@ class LargeCSVProcessor:
             file_content: For large files, process directly from memory content
         """
         try:
+            logger.info(f"PROCESSOR: Starting async processing for file {file_id}")
             db_file = UploadedFile.objects.get(id=file_id)
+            logger.info(f"PROCESSOR: Found file record: {db_file.filename}")
+            
             db_file.status = 'processing'
             db_file.save()
+            logger.info(f"PROCESSOR: Updated status to processing")
             
             # Handle different processing modes
             if file_content:
                 # Large file: process from memory content
-                logger.info(f"Processing large file {db_file.filename} from memory content")
+                logger.info(f"PROCESSOR: Processing large file {db_file.filename} from memory content, size: {len(file_content)} bytes")
                 columns, dtypes, estimated_rows = self.analyze_file_structure_from_content(file_content)
+                logger.info(f"PROCESSOR: Analysis complete - columns: {len(columns)}, estimated rows: {estimated_rows}")
             elif move_from_temp:
                 # Move from temp to permanent location if needed
+                logger.info(f"PROCESSOR: Moving file from temp location")
                 uploads_dir = '/tmp/csv_uploads'
                 os.makedirs(uploads_dir, exist_ok=True)
                 
@@ -267,33 +273,47 @@ class LargeCSVProcessor:
                 db_file.file_path = permanent_path
                 db_file.save()
                 
-                logger.info(f"Moved large file from temp to permanent location: {permanent_path}")
+                logger.info(f"PROCESSOR: Moved large file from temp to permanent location: {permanent_path}")
                 columns, dtypes, estimated_rows = self.analyze_file_structure(db_file.file_path)
             else:
                 # Small file: analyze from file path
+                logger.info(f"PROCESSOR: Analyzing small file from path: {db_file.file_path}")
                 columns, dtypes, estimated_rows = self.analyze_file_structure(db_file.file_path)
+                logger.info(f"PROCESSOR: Small file analysis complete")
             
             # Update database with initial analysis
+            logger.info(f"PROCESSOR: Updating database with analysis results")
             db_file.columns = columns
             db_file.dtypes = dtypes
             db_file.total_rows = estimated_rows
             db_file.processing_progress = 50.0
             db_file.save()
             
-            # Get detailed statistics
-            stats = self.get_file_statistics(db_file.file_path)
+            # Get detailed statistics only for files with physical paths
+            if db_file.file_path:
+                logger.info(f"PROCESSOR: Getting detailed statistics for file with path")
+                stats = self.get_file_statistics(db_file.file_path)
+                # Update with final results
+                db_file.total_rows = stats['total_rows']
+                logger.info(f"PROCESSOR: Statistics complete, final row count: {stats['total_rows']}")
+            else:
+                logger.info(f"PROCESSOR: Skipping detailed statistics for memory-processed file")
             
-            # Update with final results
-            db_file.total_rows = stats['total_rows']
             db_file.status = 'completed'
             db_file.processing_progress = 100.0
             db_file.save()
             
-            logger.info(f"Successfully processed file {db_file.filename}")
+            logger.info(f"PROCESSOR: Successfully processed file {db_file.filename}")
             
         except Exception as e:
-            logger.error(f"Error processing file {file_id}: {e}")
-            db_file = UploadedFile.objects.get(id=file_id)
-            db_file.status = 'failed'
-            db_file.error_message = str(e)
-            db_file.save()
+            logger.error(f"PROCESSOR: Error processing file {file_id}: {e}")
+            logger.exception("PROCESSOR: Full traceback:")
+            try:
+                db_file = UploadedFile.objects.get(id=file_id)
+                db_file.status = 'failed'
+                db_file.error_message = str(e)
+                db_file.save()
+                logger.info(f"PROCESSOR: Updated file {file_id} status to failed")
+            except Exception as db_error:
+                logger.error(f"PROCESSOR: Failed to update database status: {db_error}")
+            raise
