@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import shutil
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
@@ -48,25 +49,12 @@ def upload_large_csv(request):
         
         # For files > 1GB, process directly from memory without disk copy
         large_file_threshold = 1 * 1024 * 1024 * 1024  # 1GB
-        if uploaded_file.size > large_file_threshold:
-            # Create database record without file path
-            db_file = processor.create_file_record_memory(uploaded_file.name, uploaded_file.size)
-            # Process directly from uploaded file data
-            logger.info(f"{uploaded_file.name} (large file) assigned to celery worker.")
-            
-            # Encode file content as base64 for Celery serialization
-            import base64
-            file_content = uploaded_file.read()
-            file_content_b64 = base64.b64encode(file_content).decode('utf-8')
-            logger.info(f"File content encoded, size: {len(file_content_b64)}")
-            
-            process_large_csv.delay(str(db_file.id), file_content_b64=file_content_b64)
-        else:
+  
             # Small files: immediate copy, background analysis
-            logger.info(f"{uploaded_file.name} (small file) assigned to celery worker.")
-            db_file = processor.save_uploaded_file(uploaded_file, uploaded_file.name)
-            process_large_csv.delay(str(db_file.id))
-        
+        logger.info(f"{uploaded_file.name} (small file) assigned to celery worker.")
+        db_file = processor.save_uploaded_file(uploaded_file, uploaded_file.name)
+        process_large_csv.delay(str(db_file.id))
+    
         return Response({
             'message': 'File uploaded successfully. Processing started.',
             'file_id': str(db_file.id),
@@ -267,3 +255,50 @@ def get_file_stats(request, file_id):
 def health_check(request):
     """Health check endpoint."""
     return JsonResponse({'status': 'healthy'})
+
+
+@api_view(['GET'])
+def get_disk_space(request):
+    """
+    Get available disk space in the temporary directory where files are uploaded.
+    """
+    try:
+        # Get disk usage for /tmp directory
+        disk_usage = shutil.disk_usage('/tmp')
+        
+        # Convert to human readable format
+        total_bytes = disk_usage.total
+        free_bytes = disk_usage.free
+        used_bytes = total_bytes - free_bytes
+        
+        def format_bytes(bytes_value):
+            """Convert bytes to human readable format."""
+            for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+                if bytes_value < 1024.0:
+                    return f"{bytes_value:.1f} {unit}"
+                bytes_value /= 1024.0
+            return f"{bytes_value:.1f} PB"
+        
+        return Response({
+            'path': '/tmp',
+            'total_space': {
+                'bytes': total_bytes,
+                'formatted': format_bytes(total_bytes)
+            },
+            'free_space': {
+                'bytes': free_bytes,
+                'formatted': format_bytes(free_bytes)
+            },
+            'used_space': {
+                'bytes': used_bytes,
+                'formatted': format_bytes(used_bytes)
+            },
+            'usage_percentage': round((used_bytes / total_bytes) * 100, 1)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting disk space: {e}")
+        return Response(
+            {'error': f'Could not retrieve disk space: {str(e)}'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

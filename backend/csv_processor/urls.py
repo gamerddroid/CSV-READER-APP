@@ -12,4 +12,7 @@ urlpatterns = [
     
     # Health check
     path('health/', views.health_check, name='health_check'),
+    
+    # Disk space
+    path('disk-space/', views.get_disk_space, name='get_disk_space'),
 ]
